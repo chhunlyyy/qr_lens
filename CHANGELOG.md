@@ -1,3 +1,7 @@
+## 1.0.1
+
+- Rename `ScannerPage` to `QrLensScannerPage`.
+
 ## 1.0.0
 
 - Initial release.

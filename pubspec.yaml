@@ -1,6 +1,6 @@
 name: qr_lens
 description: A polished QR code scanner with animated capture overlay, live corner tracking, torch control, scan history, and URL detection. Built on camera and ML Kit.
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/chhunlyyy/qr_lens
 repository: https://github.com/chhunlyyy/qr_lens
 issue_tracker: https://github.com/chhunlyyy/qr_lens/issues

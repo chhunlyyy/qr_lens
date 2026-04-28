@@ -39,14 +39,14 @@ dependencies:
 ```dart
 import 'package:qr_lens/qr_lens.dart';
 
-// Push ScannerPage as a full-screen route
+// Push QrLensScannerPage as a full-screen route
 Navigator.push(
   context,
-  MaterialPageRoute(builder: (context) => const ScannerPage()),
+  MaterialPageRoute(builder: (context) => const QrLensScannerPage()),
 );
 ```
 
-The `ScannerPage` widget handles everything — camera initialization, scanning, overlay animations, and result display.
+The `QrLensScannerPage` widget handles everything — camera initialization, scanning, overlay animations, and result display.
 
 ## Customization
 

@@ -1,0 +1,12 @@
+packages/
+example/build/
+example/.dart_tool/
+example/android/.gradle/
+example/ios/Pods/
+example/ios/.symlinks/
+example/macos/Pods/
+example/macos/.symlinks/
+example/linux/flutter/ephemeral/
+example/windows/flutter/ephemeral/
+build/
+

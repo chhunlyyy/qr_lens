@@ -18,7 +18,7 @@ import 'scanner_theme.dart';
 // Capture flow: idle → capturing → showingQrSnippet → showingResult → idle
 enum _CaptureState { idle, capturing, showingQrSnippet, showingResult }
 
-class ScannerPage extends StatefulWidget {
+class QrLensScannerPage extends StatefulWidget {
   // ── Callbacks ──────────────────────────────────────────────────────
 
   /// Called the moment a new QR value is detected (before animation completes).
@@ -127,7 +127,7 @@ class ScannerPage extends StatefulWidget {
   /// Colour of the scanning line. When null falls back to [accentColor].
   final Color? scanLineColor;
 
-  const ScannerPage({
+  const QrLensScannerPage({
     super.key,
     // callbacks
     this.onScanned,
@@ -173,10 +173,10 @@ class ScannerPage extends StatefulWidget {
   });
 
   @override
-  State<ScannerPage> createState() => _ScannerPageState();
+  State<QrLensScannerPage> createState() => _QrLensScannerPageState();
 }
 
-/// State snapshot passed to [ScannerPage.viewFinderBuilder].
+/// State snapshot passed to [QrLensScannerPage.viewFinderBuilder].
 class ViewfinderState {
   /// The computed viewfinder bounding rectangle.
   final Rect boundingRect;
@@ -210,7 +210,7 @@ class ViewfinderState {
   });
 }
 
-class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin {
+class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProviderStateMixin {
   List<CameraDescription> _cameras = [];
   CameraController? _cameraController;
   late final AnimationController _anim;

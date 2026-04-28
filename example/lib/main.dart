@@ -30,7 +30,7 @@ class QRScannerApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const ScannerPage(),
+      home: const QrLensScannerPage(),
     );
   }
 }

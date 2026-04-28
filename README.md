@@ -1,16 +1,57 @@
-# advance_qr_scanner
+# qr_lens
 
-A new Flutter project.
+[![pub package](https://img.shields.io/pub/v/qr_lens.svg)](https://pub.dev/packages/qr_lens)
+
+A polished Flutter QR code scanner widget with animated capture overlay, live corner tracking, torch control, scan history, and URL detection. Built on `camera` and Google ML Kit.
+
+## Features
+
+- Clean scan overlay with animated scanning line
+- Live corner tracking that follows QR codes in frame
+- Smooth capture animation with haptic feedback
+- Torch/flashlight toggle
+- Front/back camera switching
+- Scan history with URL detection
+- Copy-to-clipboard and URL opening
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+Add to your `pubspec.yaml`:
 
-A few resources to get you started if this is your first Flutter project:
+```yaml
+dependencies:
+  qr_lens: ^1.0.0
+```
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+### Platform Setup
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+**iOS**: Add camera usage description to `ios/Runner/Info.plist`:
+
+```xml
+<key>NSCameraUsageDescription</key>
+<string>Camera needed to scan QR codes</string>
+```
+
+**Android**: Ensure `android/app/build.gradle` has `minSdkVersion` 21 or higher.
+
+### Usage
+
+```dart
+import 'package:qr_lens/qr_lens.dart';
+
+// Push ScannerPage as a full-screen route
+Navigator.push(
+  context,
+  MaterialPageRoute(builder: (context) => const ScannerPage()),
+);
+```
+
+The `ScannerPage` widget handles everything — camera initialization, scanning, overlay animations, and result display.
+
+## Customization
+
+You can override the accent and success colors by importing `scanner_theme.dart` and changing `kAccent` and `kSuccess` in your own theme, or pass them via the widget constructors if you extend the classes.
+
+## License
+
+MIT

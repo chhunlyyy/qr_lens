@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -18,17 +19,202 @@ import 'scanner_theme.dart';
 enum _CaptureState { idle, capturing, showingQrSnippet, showingResult }
 
 class ScannerPage extends StatefulWidget {
-  const ScannerPage({super.key});
+  // ── Callbacks ──────────────────────────────────────────────────────
+
+  /// Called the moment a new QR value is detected (before animation completes).
+  final void Function(String value)? onScanned;
+
+  /// Called when the capture animation finishes and the result card is shown.
+  final void Function(String value)? onScanComplete;
+
+  /// Called if the camera fails to initialize or encounters a runtime error.
+  final void Function(Object error)? onError;
+
+  /// Called once the camera has initialized and the image stream is running.
+  final VoidCallback? onCameraReady;
+
+  // ── App bar ────────────────────────────────────────────────────────
+
+  /// App bar title widget. Defaults to a "QR Scanner" text label.
+  final Widget title;
+
+  /// Replaces the entire app bar. Receives [isBackCamera] for conditional
+  /// UI such as the torch toggle.
+  final PreferredSizeWidget Function(BuildContext context, {required bool isBackCamera})? appBarBuilder;
+
+  // ── Toggles ────────────────────────────────────────────────────────
+
+  /// Show/hide the torch toggle button (only visible on back camera).
+  final bool showTorchButton;
+
+  /// Show/hide the camera flip button.
+  final bool showFlipButton;
+
+  /// Show/hide the history button (automatically hidden when history is empty).
+  final bool showHistoryButton;
+
+  /// Whether to play haptic feedback when a QR code is captured.
+  final bool hapticFeedback;
+
+  // ── Camera ─────────────────────────────────────────────────────────
+
+  /// Camera resolution preset. Defaults to [ResolutionPreset.veryHigh].
+  final ResolutionPreset cameraResolution;
+
+  /// Preferred initial lens direction. Defaults to back-facing camera.
+  final CameraLensDirection preferredLensDirection;
+
+  // ── Scanning ───────────────────────────────────────────────────────
+
+  /// Barcode formats that the scanner recognises. Defaults to QR codes only.
+  final List<BarcodeFormat> barcodeFormats;
+
+  // ── Viewfinder ─────────────────────────────────────────────────────
+
+  /// Fraction of the shorter screen edge used for the scan viewfinder.
+  final double viewfinderSizeRatio;
+
+  /// Replaces the entire viewfinder overlay. When provided the default
+  /// [ScannerBox] / [QrOverlayPainter] stack is omitted.
+  final Widget Function(BuildContext context, ViewfinderState state)? viewFinderBuilder;
+
+  // ── Hint ───────────────────────────────────────────────────────────
+
+  /// Hint text shown below the viewfinder when idle. Set null to hide.
+  final String? hintText;
+
+  /// Style for the hint text.
+  final TextStyle? hintTextStyle;
+
+  // ── Result ─────────────────────────────────────────────────────────
+
+  /// Replaces the default result card. Receives the scanned value.
+  final Widget Function(BuildContext context, String value)? resultBuilder;
+
+  // ── History ────────────────────────────────────────────────────────
+
+  /// Replaces the default history bottom-sheet. Receives an immutable copy
+  /// of the scan history list.
+  final Widget Function(BuildContext context, List<String> history)? historyBuilder;
+
+  /// Maximum number of entries kept in the scan history.
+  final int scanHistoryMaxSize;
+
+  // ── Timing ─────────────────────────────────────────────────────────
+
+  /// Delay between the box-animation completing and the QR-snippet
+  /// animation starting.
+  final Duration qrSnippetDelay;
+
+  /// Delay after the QR-move animation completes before [onScanComplete]
+  /// is invoked.
+  final Duration onScanCompleteDelay;
+
+  /// How long the result is shown before the scanner resets.
+  final Duration resultDuration;
+
+  // ── Colours ────────────────────────────────────────────────────────
+
+  /// Primary accent colour for corners, scan line, and result card border.
+  final Color accentColor;
+
+  /// Colour used for the success glow when a QR is captured.
+  final Color successColor;
+
+  /// Background colour of the scaffold. Defaults to [Colors.black].
+  final Color scaffoldBackgroundColor;
+
+  /// Colour of the scanning line. When null falls back to [accentColor].
+  final Color? scanLineColor;
+
+  const ScannerPage({
+    super.key,
+    // callbacks
+    this.onScanned,
+    this.onScanComplete,
+    this.onError,
+    this.onCameraReady,
+    // app bar
+    this.title = const Text(
+      'QR Scanner',
+      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 0.4),
+    ),
+    this.appBarBuilder,
+    // toggles
+    this.showTorchButton = true,
+    this.showFlipButton = true,
+    this.showHistoryButton = true,
+    this.hapticFeedback = true,
+    // camera
+    this.cameraResolution = ResolutionPreset.veryHigh,
+    this.preferredLensDirection = CameraLensDirection.back,
+    // scanning
+    this.barcodeFormats = const [BarcodeFormat.qrCode],
+    // viewfinder
+    this.viewfinderSizeRatio = 0.68,
+    this.viewFinderBuilder,
+    // hint
+    this.hintText = 'Point camera at a QR code',
+    this.hintTextStyle,
+    // result
+    this.resultBuilder,
+    // history
+    this.historyBuilder,
+    this.scanHistoryMaxSize = 20,
+    // timing
+    this.qrSnippetDelay = const Duration(milliseconds: 500),
+    this.onScanCompleteDelay = Duration.zero,
+    this.resultDuration = const Duration(milliseconds: 2800),
+    // colours
+    this.accentColor = kAccent,
+    this.successColor = kSuccess,
+    this.scaffoldBackgroundColor = Colors.black,
+    this.scanLineColor,
+  });
 
   @override
   State<ScannerPage> createState() => _ScannerPageState();
+}
+
+/// State snapshot passed to [ScannerPage.viewFinderBuilder].
+class ViewfinderState {
+  /// The computed viewfinder bounding rectangle.
+  final Rect boundingRect;
+
+  /// Normalised scan-line progress (0 → 1).
+  final double scanProgress;
+
+  /// Current overlay alpha.
+  final double overlayAlpha;
+
+  /// Whether a QR is currently being captured.
+  final bool isCapturing;
+
+  /// Whether the scanner is in the "showing result" phase.
+  final bool isShowingResult;
+
+  /// The detected QR corner rect, or null.
+  final Rect? detectedRect;
+
+  /// The scanned value, or null.
+  final String? scannedValue;
+
+  const ViewfinderState({
+    required this.boundingRect,
+    required this.scanProgress,
+    required this.overlayAlpha,
+    required this.isCapturing,
+    required this.isShowingResult,
+    this.detectedRect,
+    this.scannedValue,
+  });
 }
 
 class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin {
   List<CameraDescription> _cameras = [];
   CameraController? _cameraController;
   late final AnimationController _anim;
-  final BarcodeScanner _barcodeScanner = BarcodeScanner(formats: [BarcodeFormat.qrCode]);
+  late final BarcodeScanner _barcodeScanner;
 
   int _sensorOrientation = 90;
   bool _isCameraReady = false;
@@ -60,6 +246,7 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
+    _barcodeScanner = BarcodeScanner(formats: widget.barcodeFormats);
     _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 2400))..repeat();
     _anim.addListener(_onAnimTick);
 
@@ -91,10 +278,12 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
   }
 
   Future<void> _initCamera() async {
+    final status = await Permission.camera.request();
+    if (!status.isGranted) return;
     _cameras = await availableCameras();
     if (_cameras.isEmpty) return;
     final camera = _cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.back,
+      (c) => c.lensDirection == widget.preferredLensDirection,
       orElse: () => _cameras.first,
     );
     await _startCamera(camera);
@@ -108,7 +297,7 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
 
     _cameraController = CameraController(
       camera,
-      ResolutionPreset.veryHigh,
+      widget.cameraResolution,
       enableAudio: false,
       imageFormatGroup: Platform.isIOS ? ImageFormatGroup.bgra8888 : ImageFormatGroup.nv21,
     );
@@ -121,7 +310,9 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
         _isCameraReady = true;
         _isTorchOn = false;
       });
+      widget.onCameraReady?.call();
     } catch (e) {
+      widget.onError?.call(e);
       debugPrint('Camera error: $e');
     }
   }
@@ -330,9 +521,11 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
     _stopCameraStream();
     if (!mounted) return;
 
+    widget.onScanned?.call(value);
+
     _scanHistory.remove(value);
     _scanHistory.insert(0, value);
-    if (_scanHistory.length > 20) _scanHistory.removeLast();
+    if (_scanHistory.length > widget.scanHistoryMaxSize) _scanHistory.removeLast();
 
     setState(() {
       _captureState = _CaptureState.capturing;
@@ -351,12 +544,12 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
 
   void _onBoxStatus(AnimationStatus status) {
     if (!mounted || status != AnimationStatus.completed) return;
-    HapticFeedback.mediumImpact();
+    if (widget.hapticFeedback) HapticFeedback.mediumImpact();
     setState(() {
       _captureState = _CaptureState.showingQrSnippet;
       _currentRect = _captureTargetRect;
     });
-    Future.delayed(const Duration(milliseconds: 500), () {
+    Future.delayed(widget.qrSnippetDelay, () {
       if (!mounted) return;
       _qrMoveAnim.forward(from: 0);
     });
@@ -369,7 +562,11 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
   void _onQrMoveStatus(AnimationStatus status) {
     if (!mounted || status != AnimationStatus.completed) return;
     setState(() => _captureState = _CaptureState.showingResult);
-    Future.delayed(const Duration(milliseconds: 2800), () {
+    Future.delayed(widget.onScanCompleteDelay, () {
+      if (!mounted || _scannedValue == null) return;
+      widget.onScanComplete?.call(_scannedValue!);
+    });
+    Future.delayed(widget.resultDuration, () {
       if (!mounted) return;
       _resetCapture();
     });
@@ -382,7 +579,7 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
     final startRect = _captureTargetRect!;
     final endCenter = Offset(screenSize.width / 2, screenSize.height / 2);
     final currentCenter = Offset.lerp(startRect.center, endCenter, t)!;
-    final endSize = math.min(screenSize.width, screenSize.height) * 0.68;
+    final endSize = math.min(screenSize.width, screenSize.height) * widget.viewfinderSizeRatio;
     final currentSize = ui.lerpDouble(startRect.width, endSize, t)!;
     return Rect.fromCenter(center: currentCenter, width: currentSize, height: currentSize);
   }
@@ -413,7 +610,7 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
   Rect get _viewfinderRect {
     final screen = MediaQuery.of(context).size;
     final short = math.min(screen.width, screen.height);
-    final boxSize = short * 0.68;
+    final boxSize = short * widget.viewfinderSizeRatio;
     return Rect.fromCenter(center: Offset(screen.width / 2, screen.height * 0.44), width: boxSize, height: boxSize);
   }
 
@@ -424,17 +621,16 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _HistorySheet(history: List.unmodifiable(_scanHistory)),
+      builder: (_) => widget.historyBuilder != null
+          ? widget.historyBuilder!(context, List.unmodifiable(_scanHistory))
+          : _HistorySheet(history: List.unmodifiable(_scanHistory), accentColor: widget.accentColor),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_isCameraReady || _cameraController == null) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator(color: Colors.white)),
-      );
+      return Scaffold(backgroundColor: widget.scaffoldBackgroundColor);
     }
 
     final viewfinderRect = _viewfinderRect;
@@ -452,8 +648,9 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
 
     return Scaffold(
       extendBodyBehindAppBar: true,
-      backgroundColor: Colors.black,
-      appBar: _appBar(isBackCamera: isBackCamera),
+      backgroundColor: widget.scaffoldBackgroundColor,
+      appBar: widget.appBarBuilder?.call(context, isBackCamera: isBackCamera) ??
+          _appBar(isBackCamera: isBackCamera),
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -483,14 +680,29 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
                 final qrProgress = isShowingQrSnippet
                     ? Curves.easeOutCubic.transform(_qrMoveAnim.value)
                     : (isShowingQr ? 1.0 : 0.0);
-                final targetSize = math.min(screen.width, screen.height) * 0.68;
+                final targetSize = math.min(screen.width, screen.height) * widget.viewfinderSizeRatio;
                 final qrTargetRect = Rect.fromCenter(
                   center: Offset(screen.width / 2, screen.height / 2),
                   width: targetSize,
                   height: targetSize,
                 );
 
-                return _ScannerBox(
+                if (widget.viewFinderBuilder != null) {
+                  return widget.viewFinderBuilder!(
+                    context,
+                    ViewfinderState(
+                      boundingRect: isShowingQr ? (_currentRect ?? viewfinderRect) : displayRect,
+                      scanProgress: _anim.value,
+                      overlayAlpha: isShowingQr ? 0.92 : displayAlpha,
+                      isCapturing: !isShowingQr && _captureState == _CaptureState.capturing,
+                      isShowingResult: isShowingQr,
+                      detectedRect: _currentRect,
+                      scannedValue: _scannedValue,
+                    ),
+                  );
+                }
+
+                return ScannerBox(
                   boundingRect: isShowingQr ? (_currentRect ?? viewfinderRect) : displayRect,
                   scanProgress: _anim.value,
                   alpha: isShowingQr ? 0.92 : displayAlpha,
@@ -502,12 +714,15 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
                   qrStartRect: _captureTargetRect,
                   qrTargetRect: qrTargetRect,
                   qrProgress: qrProgress,
+                  accentColor: widget.accentColor,
+                  successColor: widget.successColor,
+                  scanLineColor: widget.scanLineColor ?? widget.accentColor,
                 );
               },
             ),
           ),
 
-          if (isIdle && _currentRect == null)
+          if (isIdle && _currentRect == null && widget.hintText != null)
             Positioned(
               top: viewfinderRect.bottom + 16,
               left: 0,
@@ -516,10 +731,11 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                   decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(20)),
-                  child: const Text(
-                    'Point camera at a QR code',
+                  child: Text(
+                    widget.hintText!,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.6, letterSpacing: 0.3),
+                    style: widget.hintTextStyle ??
+                        const TextStyle(color: Colors.white70, fontSize: 13, height: 1.6, letterSpacing: 0.3),
                   ),
                 ),
               ),
@@ -530,7 +746,9 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
               alignment: Alignment.bottomCenter,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).padding.bottom + 32),
-                child: _ResultCard(value: _scannedValue!),
+                child: widget.resultBuilder != null
+                    ? widget.resultBuilder!(context, _scannedValue!)
+                    : _ResultCard(value: _scannedValue!, accentColor: widget.accentColor),
               ),
             ),
         ],
@@ -542,26 +760,24 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
     return AppBar(
       backgroundColor: Colors.transparent,
       elevation: 0,
-      title: const Text(
-        'QR Scanner',
-        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: 0.4),
-      ),
+      title: widget.title,
       actions: [
-        if (isBackCamera)
+        if (widget.showTorchButton && isBackCamera)
           IconButton(
             icon: Icon(
               _isTorchOn ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded,
-              color: _isTorchOn ? kAccent : Colors.white70,
+              color: _isTorchOn ? widget.accentColor : Colors.white70,
             ),
             tooltip: 'Toggle torch',
             onPressed: _toggleTorch,
           ),
-        IconButton(
-          icon: const Icon(Icons.cameraswitch_rounded, color: Colors.white70),
-          tooltip: 'Flip camera',
-          onPressed: _switchCamera,
-        ),
-        if (_scanHistory.isNotEmpty)
+        if (widget.showFlipButton)
+          IconButton(
+            icon: const Icon(Icons.cameraswitch_rounded, color: Colors.white70),
+            tooltip: 'Flip camera',
+            onPressed: _switchCamera,
+          ),
+        if (widget.showHistoryButton && _scanHistory.isNotEmpty)
           IconButton(
             icon: const Icon(Icons.history_rounded, color: Colors.white70),
             tooltip: 'Scan history',
@@ -573,7 +789,7 @@ class _ScannerPageState extends State<ScannerPage> with TickerProviderStateMixin
   }
 }
 
-class _ScannerBox extends StatelessWidget {
+class ScannerBox extends StatelessWidget {
   final Rect boundingRect;
   final double scanProgress;
   final double alpha;
@@ -585,8 +801,12 @@ class _ScannerBox extends StatelessWidget {
   final Rect? qrStartRect;
   final Rect? qrTargetRect;
   final double qrProgress;
+  final Color accentColor;
+  final Color successColor;
+  final Color scanLineColor;
 
-  const _ScannerBox({
+  const ScannerBox({
+    super.key,
     required this.boundingRect,
     required this.scanProgress,
     required this.alpha,
@@ -598,6 +818,9 @@ class _ScannerBox extends StatelessWidget {
     this.qrStartRect,
     this.qrTargetRect,
     this.qrProgress = 0.0,
+    this.accentColor = kAccent,
+    this.successColor = kSuccess,
+    this.scanLineColor = kAccent,
   });
 
   @override
@@ -613,6 +836,9 @@ class _ScannerBox extends StatelessWidget {
             isScanned: isScanned,
             isIdle: isIdle,
             isCapturing: isCapturing,
+            accentColor: accentColor,
+            successColor: successColor,
+            scanLineColor: scanLineColor,
           ),
         ),
         if (showQrContent && qrData != null && qrTargetRect != null && qrStartRect != null)
@@ -669,7 +895,8 @@ class _ScannerBox extends StatelessWidget {
 
 class _HistorySheet extends StatelessWidget {
   final List<String> history;
-  const _HistorySheet({required this.history});
+  final Color accentColor;
+  const _HistorySheet({required this.history, this.accentColor = kAccent});
 
   static bool _isUrl(String v) => v.startsWith('http://') || v.startsWith('https://');
 
@@ -709,7 +936,7 @@ class _HistorySheet extends StatelessWidget {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 leading: Icon(
                   isUrl ? Icons.link_rounded : Icons.qr_code_2_rounded,
-                  color: kAccent,
+                  color: accentColor,
                   size: 20,
                 ),
                 title: Text(
@@ -753,7 +980,8 @@ class _HistorySheet extends StatelessWidget {
 
 class _ResultCard extends StatelessWidget {
   final String value;
-  const _ResultCard({required this.value});
+  final Color accentColor;
+  const _ResultCard({required this.value, this.accentColor = kAccent});
 
   bool get _isUrl => value.startsWith('http://') || value.startsWith('https://');
 
@@ -765,8 +993,8 @@ class _ResultCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF111111),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kAccent.withValues(alpha: 0.55)),
-        boxShadow: [BoxShadow(color: kAccent.withValues(alpha: 0.18), blurRadius: 24)],
+        border: Border.all(color: accentColor.withValues(alpha: 0.55)),
+        boxShadow: [BoxShadow(color: accentColor.withValues(alpha: 0.18), blurRadius: 24)],
       ),
       child: Row(
         children: [
@@ -774,10 +1002,10 @@ class _ResultCard extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: kAccent.withValues(alpha: 0.12),
+              color: accentColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(_isUrl ? Icons.link_rounded : Icons.qr_code_2_rounded, color: kAccent, size: 22),
+            child: Icon(_isUrl ? Icons.link_rounded : Icons.qr_code_2_rounded, color: accentColor, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -787,8 +1015,8 @@ class _ResultCard extends StatelessWidget {
               children: [
                 Text(
                   _isUrl ? 'URL DETECTED' : 'QR CODE SCANNED',
-                  style: const TextStyle(
-                    color: kAccent,
+                  style: TextStyle(
+                    color: accentColor,
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.2,

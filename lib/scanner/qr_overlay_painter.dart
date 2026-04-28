@@ -9,6 +9,9 @@ class QrOverlayPainter extends CustomPainter {
   final bool isScanned;
   final bool isIdle;
   final bool isCapturing;
+  final Color accentColor;
+  final Color successColor;
+  final Color scanLineColor;
 
   static const _cornerLen = 24.0;
   static const _cornerStroke = 3.0;
@@ -20,9 +23,12 @@ class QrOverlayPainter extends CustomPainter {
     required this.isScanned,
     this.isIdle = false,
     this.isCapturing = false,
+    this.accentColor = kAccent,
+    this.successColor = kSuccess,
+    this.scanLineColor = kAccent,
   });
 
-  Color get _cornerColor => isScanned ? kSuccess : (isIdle ? Colors.white : kAccent);
+  Color get _cornerColor => isScanned ? successColor : (isIdle ? Colors.white : accentColor);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -51,7 +57,7 @@ class QrOverlayPainter extends CustomPainter {
     path.fillType = PathFillType.evenOdd;
     canvas.drawPath(path, dimPaint);
 
-    final borderColor = isIdle ? Colors.white : kAccent;
+    final borderColor = isIdle ? Colors.white : accentColor;
     canvas.drawRRect(
       RRect.fromRectAndRadius(boundingRect.inflate(4), const Radius.circular(10)),
       Paint()
@@ -117,8 +123,8 @@ class QrOverlayPainter extends CustomPainter {
           end: Alignment.bottomCenter,
           colors: [
             Colors.transparent,
-            kAccent.withValues(alpha: 0.10 * alpha),
-            kAccent.withValues(alpha: 0.04 * alpha),
+            scanLineColor.withValues(alpha: 0.10 * alpha),
+            scanLineColor.withValues(alpha: 0.04 * alpha),
             Colors.transparent,
           ],
           stops: const [0, 0.35, 0.65, 1],
@@ -132,9 +138,9 @@ class QrOverlayPainter extends CustomPainter {
         ..shader = LinearGradient(
           colors: [
             Colors.transparent,
-            kAccent.withValues(alpha: 0.50 * alpha),
-            kAccent.withValues(alpha: alpha),
-            kAccent.withValues(alpha: 0.50 * alpha),
+            scanLineColor.withValues(alpha: 0.50 * alpha),
+            scanLineColor.withValues(alpha: alpha),
+            scanLineColor.withValues(alpha: 0.50 * alpha),
             Colors.transparent,
           ],
           stops: const [0, 0.15, 0.5, 0.85, 1],
@@ -150,7 +156,7 @@ class QrOverlayPainter extends CustomPainter {
     canvas.drawRRect(
       RRect.fromRectAndRadius(boundingRect.inflate(4), const Radius.circular(10)),
       Paint()
-        ..color = kAccent.withValues(alpha: 0.08 * alpha)
+        ..color = accentColor.withValues(alpha: 0.08 * alpha)
         ..style = PaintingStyle.fill,
     );
   }
@@ -164,7 +170,7 @@ class QrOverlayPainter extends CustomPainter {
         const Radius.circular(10),
       ),
       Paint()
-        ..color = kSuccess.withValues(alpha: (0.12 + 0.18 * pulse) * alpha)
+        ..color = successColor.withValues(alpha: (0.12 + 0.18 * pulse) * alpha)
         ..maskFilter = MaskFilter.blur(BlurStyle.normal, 10 + 10 * pulse)
         ..style = PaintingStyle.fill,
     );
@@ -172,7 +178,7 @@ class QrOverlayPainter extends CustomPainter {
     canvas.drawRRect(
       RRect.fromRectAndRadius(boundingRect, const Radius.circular(6)),
       Paint()
-        ..color = kSuccess.withValues(alpha: (0.05 + 0.07 * pulse) * alpha)
+        ..color = successColor.withValues(alpha: (0.05 + 0.07 * pulse) * alpha)
         ..style = PaintingStyle.fill,
     );
   }
@@ -184,5 +190,8 @@ class QrOverlayPainter extends CustomPainter {
       old.alpha != alpha ||
       old.isScanned != isScanned ||
       old.isIdle != isIdle ||
-      old.isCapturing != isCapturing;
+      old.isCapturing != isCapturing ||
+      old.accentColor != accentColor ||
+      old.successColor != successColor ||
+      old.scanLineColor != scanLineColor;
 }

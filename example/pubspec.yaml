@@ -1,0 +1,21 @@
+name: qr_lens_example
+description: Example app for qr_lens package
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.7.2
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  qr_lens:
+    path: ../
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

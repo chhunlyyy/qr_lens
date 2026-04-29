@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -17,6 +18,35 @@ import 'scanner_theme.dart';
 
 // Capture flow: idle → capturing → showingQrSnippet → showingResult → idle
 enum _CaptureState { idle, capturing, showingQrSnippet, showingResult }
+
+/// Provides programmatic control over [QrLensScannerPage].
+///
+/// Pass an instance to [QrLensScannerPage.controller] and call [scanFromFile]
+/// to trigger a scan from any [XFile] — e.g. one returned by a custom image
+/// picker, [file_picker], or [photo_manager].
+class QrLensScannerController {
+  _QrLensScannerPageState? _state;
+
+  void _attach(_QrLensScannerPageState state) => _state = state;
+  void _detach() => _state = null;
+
+  /// Scan a QR code from [file]. No-op if a scan is already in progress.
+  Future<void> scanFromFile(XFile file) async {
+    await _state?._processPickedFile(file);
+  }
+
+  /// Stops the camera image stream. The scanner will stop processing frames
+  /// and remain on the current preview frame.
+  Future<void> stopStream() async {
+    _state?._stopCameraStream();
+  }
+
+  /// Resumes the camera image stream after it has been stopped manually or
+  /// by disabling [QrLensScannerPage.autoResume].
+  Future<void> resumeStream() async {
+    await _state?._resetCapture();
+  }
+}
 
 class QrLensScannerPage extends StatefulWidget {
   // ── Callbacks ──────────────────────────────────────────────────────
@@ -52,6 +82,17 @@ class QrLensScannerPage extends StatefulWidget {
 
   /// Show/hide the history button (automatically hidden when history is empty).
   final bool showHistoryButton;
+
+  /// Show/hide the upload button to scan QR codes from gallery images.
+  final bool showUploadButton;
+
+  /// Replaces the built-in gallery picker invoked by the upload button.
+  /// Return an [XFile] to proceed with scanning, or null to cancel.
+  /// When null the default [ImagePicker] gallery picker is used.
+  final Future<XFile?> Function()? imagePickerBuilder;
+
+  /// Controller for programmatic operations such as scanning from a file.
+  final QrLensScannerController? controller;
 
   /// Whether to play haptic feedback when a QR code is captured.
   final bool hapticFeedback;
@@ -102,6 +143,16 @@ class QrLensScannerPage extends StatefulWidget {
 
   // ── Timing ─────────────────────────────────────────────────────────
 
+  /// Duration of the scan-line sweep animation.
+  final Duration scanLineAnimationDuration;
+
+  /// Duration of the bounding-box expand/contract animation when a QR
+  /// is captured.
+  final Duration boxAnimationDuration;
+
+  /// Duration of the QR-code fly-to-center animation.
+  final Duration qrMoveAnimationDuration;
+
   /// Delay between the box-animation completing and the QR-snippet
   /// animation starting.
   final Duration qrSnippetDelay;
@@ -112,6 +163,12 @@ class QrLensScannerPage extends StatefulWidget {
 
   /// How long the result is shown before the scanner resets.
   final Duration resultDuration;
+
+  /// When true (default), the camera stream automatically resumes after
+  /// [resultDuration] expires and the scanner begins looking for codes again.
+  /// When false, the scanner stays on the frozen frame after a scan completes
+  /// and you must call [QrLensScannerController.resumeStream] to restart.
+  final bool autoResume;
 
   // ── Colours ────────────────────────────────────────────────────────
 
@@ -144,6 +201,9 @@ class QrLensScannerPage extends StatefulWidget {
     this.showTorchButton = true,
     this.showFlipButton = true,
     this.showHistoryButton = true,
+    this.showUploadButton = true,
+    this.imagePickerBuilder,
+    this.controller,
     this.hapticFeedback = true,
     // camera
     this.cameraResolution = ResolutionPreset.veryHigh,
@@ -162,9 +222,13 @@ class QrLensScannerPage extends StatefulWidget {
     this.historyBuilder,
     this.scanHistoryMaxSize = 20,
     // timing
+    this.scanLineAnimationDuration = const Duration(milliseconds: 2400),
+    this.boxAnimationDuration = const Duration(milliseconds: 350),
+    this.qrMoveAnimationDuration = const Duration(milliseconds: 900),
     this.qrSnippetDelay = const Duration(milliseconds: 500),
     this.onScanCompleteDelay = Duration.zero,
     this.resultDuration = const Duration(milliseconds: 2800),
+    this.autoResume = true,
     // colours
     this.accentColor = kAccent,
     this.successColor = kSuccess,
@@ -246,15 +310,16 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
   @override
   void initState() {
     super.initState();
+    widget.controller?._attach(this);
     _barcodeScanner = BarcodeScanner(formats: widget.barcodeFormats);
-    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 2400))..repeat();
+    _anim = AnimationController(vsync: this, duration: widget.scanLineAnimationDuration)..repeat();
     _anim.addListener(_onAnimTick);
 
-    _boxAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
+    _boxAnim = AnimationController(vsync: this, duration: widget.boxAnimationDuration);
     _boxAnim.addListener(_onBoxTick);
     _boxAnim.addStatusListener(_onBoxStatus);
 
-    _qrMoveAnim = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _qrMoveAnim = AnimationController(vsync: this, duration: widget.qrMoveAnimationDuration);
     _qrMoveAnim.addListener(_onQrMoveTick);
     _qrMoveAnim.addStatusListener(_onQrMoveStatus);
 
@@ -262,7 +327,17 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
   }
 
   @override
+  void didUpdateWidget(QrLensScannerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._detach();
+      widget.controller?._attach(this);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.controller?._detach();
     _anim.removeListener(_onAnimTick);
     _anim.dispose();
     _boxAnim.removeListener(_onBoxTick);
@@ -462,11 +537,16 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
 
   InputImageRotation? _intToRotation(int degrees) {
     switch (degrees) {
-      case 0: return InputImageRotation.rotation0deg;
-      case 90: return InputImageRotation.rotation90deg;
-      case 180: return InputImageRotation.rotation180deg;
-      case 270: return InputImageRotation.rotation270deg;
-      default: return null;
+      case 0:
+        return InputImageRotation.rotation0deg;
+      case 90:
+        return InputImageRotation.rotation90deg;
+      case 180:
+        return InputImageRotation.rotation180deg;
+      case 270:
+        return InputImageRotation.rotation270deg;
+      default:
+        return null;
     }
   }
 
@@ -497,6 +577,7 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
   }
 
   Future<void> _freezeFrame() async {
+    if (_frozenFrameBytes != null) return; // already provided (e.g. uploaded image)
     try {
       final boundary = _previewKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
       if (boundary == null) return;
@@ -504,6 +585,77 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data != null) _frozenFrameBytes = data.buffer.asUint8List();
     } catch (_) {}
+  }
+
+  Future<void> _resumeCameraStream() async {
+    final ctrl = _cameraController;
+    if (ctrl != null && ctrl.value.isInitialized && !ctrl.value.isStreamingImages) {
+      setState(() => _frozenFrameBytes = null);
+      await ctrl.startImageStream(_processImage);
+    }
+  }
+
+  Future<void> _pickAndScanImage() async {
+    if (_captureState != _CaptureState.idle) return;
+    _stopCameraStream();
+
+    final XFile? file = widget.imagePickerBuilder != null
+        ? await widget.imagePickerBuilder!()
+        : await ImagePicker().pickImage(source: ImageSource.gallery);
+
+    if (!mounted) return;
+
+    if (file == null) {
+      await _resumeCameraStream();
+      return;
+    }
+
+    await _processPickedFile(file);
+  }
+
+  /// Scans [file] for a QR code and shows the result directly without capture animation.
+  /// Can be called directly from [QrLensScannerController.scanFromFile].
+  Future<void> _processPickedFile(XFile file) async {
+    if (_captureState != _CaptureState.idle) return;
+    _stopCameraStream();
+
+    final bytes = await file.readAsBytes();
+    final inputImage = InputImage.fromFilePath(file.path);
+    final barcodes = await _barcodeScanner.processImage(inputImage);
+
+    if (!mounted) return;
+
+    if (barcodes.isEmpty || barcodes.first.rawValue == null) {
+      await _resumeCameraStream();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No QR code found in image'), duration: Duration(seconds: 2)));
+      return;
+    }
+
+    final value = barcodes.first.rawValue!;
+    _scannedValue = value;
+    _frozenFrameBytes = bytes;
+    _anim.stop();
+
+    if (!mounted) return;
+    widget.onScanned?.call(value);
+
+    _scanHistory.remove(value);
+    _scanHistory.insert(0, value);
+    if (_scanHistory.length > widget.scanHistoryMaxSize) _scanHistory.removeLast();
+
+    setState(() => _captureState = _CaptureState.showingResult);
+
+    widget.onScanComplete?.call(value);
+
+    if (widget.autoResume) {
+      Future.delayed(widget.resultDuration, () {
+        if (!mounted) return;
+        _resetCapture();
+      });
+    }
   }
 
   Future<void> _startCapture(Rect qrRect, String value) async {
@@ -516,7 +668,7 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     _captureStartRect = _currentRect ?? _viewfinderRect;
     _captureTargetRect = qrRect.inflate(8);
 
-    await _freezeFrame();  // snapshot while stream is still live
+    await _freezeFrame(); // snapshot while stream is still live
     _anim.stop();
     _stopCameraStream();
     if (!mounted) return;
@@ -566,10 +718,12 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
       if (!mounted || _scannedValue == null) return;
       widget.onScanComplete?.call(_scannedValue!);
     });
-    Future.delayed(widget.resultDuration, () {
-      if (!mounted) return;
-      _resetCapture();
-    });
+    if (widget.autoResume) {
+      Future.delayed(widget.resultDuration, () {
+        if (!mounted) return;
+        _resetCapture();
+      });
+    }
   }
 
   Rect? _computeQrSnippetRect() {
@@ -618,9 +772,7 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF111111),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => widget.historyBuilder != null
           ? widget.historyBuilder!(context, List.unmodifiable(_scanHistory))
           : _HistorySheet(history: List.unmodifiable(_scanHistory), accentColor: widget.accentColor),
@@ -649,8 +801,7 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     return Scaffold(
       extendBodyBehindAppBar: true,
       backgroundColor: widget.scaffoldBackgroundColor,
-      appBar: widget.appBarBuilder?.call(context, isBackCamera: isBackCamera) ??
-          _appBar(isBackCamera: isBackCamera),
+      appBar: widget.appBarBuilder?.call(context, isBackCamera: isBackCamera) ?? _appBar(isBackCamera: isBackCamera),
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -669,9 +820,7 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
           ),
 
           if (_frozenFrameBytes != null)
-            Positioned.fill(
-              child: Image.memory(_frozenFrameBytes!, fit: BoxFit.cover, gaplessPlayback: true),
-            ),
+            Positioned.fill(child: Image.memory(_frozenFrameBytes!, fit: BoxFit.cover, gaplessPlayback: true)),
 
           Positioned.fill(
             child: AnimatedBuilder(
@@ -688,7 +837,7 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
                 );
 
                 if (widget.viewFinderBuilder != null) {
-                  return widget.viewFinderBuilder!(
+                  final customView = widget.viewFinderBuilder!(
                     context,
                     ViewfinderState(
                       boundingRect: isShowingQr ? (_currentRect ?? viewfinderRect) : displayRect,
@@ -700,6 +849,24 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
                       scannedValue: _scannedValue,
                     ),
                   );
+
+                  if (isShowingQr && _scannedValue != null && _captureTargetRect != null) {
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        customView,
+                        QrContentWidget(
+                          qrData: _scannedValue!,
+                          qrStartRect: _captureTargetRect!,
+                          qrTargetRect: qrTargetRect,
+                          qrProgress: qrProgress,
+                          padding: const EdgeInsets.all(14),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return customView;
                 }
 
                 return ScannerBox(
@@ -734,7 +901,8 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
                   child: Text(
                     widget.hintText!,
                     textAlign: TextAlign.center,
-                    style: widget.hintTextStyle ??
+                    style:
+                        widget.hintTextStyle ??
                         const TextStyle(color: Colors.white70, fontSize: 13, height: 1.6, letterSpacing: 0.3),
                   ),
                 ),
@@ -762,6 +930,12 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
       elevation: 0,
       title: widget.title,
       actions: [
+        if (widget.showUploadButton)
+          IconButton(
+            icon: const Icon(Icons.photo_library_rounded, color: Colors.white70),
+            tooltip: 'Scan from gallery',
+            onPressed: _captureState == _CaptureState.idle ? _pickAndScanImage : null,
+          ),
         if (widget.showTorchButton && isBackCamera)
           IconButton(
             icon: Icon(
@@ -785,6 +959,71 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
           ),
         const SizedBox(width: 4),
       ],
+    );
+  }
+}
+
+class QrContentWidget extends StatelessWidget {
+  final String qrData;
+  final Rect qrStartRect;
+  final Rect qrTargetRect;
+  final double qrProgress;
+  final EdgeInsets padding;
+
+  const QrContentWidget({
+    super.key,
+    required this.qrData,
+    required this.qrStartRect,
+    required this.qrTargetRect,
+    required this.qrProgress,
+    this.padding = EdgeInsets.zero,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const inset = 3.0;
+    final startQRRect = Rect.fromLTRB(
+      qrStartRect.left + padding.left + inset,
+      qrStartRect.top + padding.top + inset,
+      qrStartRect.right - padding.right - inset,
+      qrStartRect.bottom - padding.bottom - inset,
+    );
+    final targetQRRect = Rect.fromLTRB(
+      qrTargetRect.left + padding.left + inset,
+      qrTargetRect.top + padding.top + inset,
+      qrTargetRect.right - padding.right - inset,
+      qrTargetRect.bottom - padding.bottom - inset,
+    );
+
+    final offset = Offset.lerp(startQRRect.topLeft - targetQRRect.topLeft, Offset.zero, qrProgress)!;
+
+    final scale = ui.lerpDouble(startQRRect.width / targetQRRect.width, 1.0, qrProgress)!;
+
+    return Positioned(
+      left: targetQRRect.left,
+      top: targetQRRect.top,
+      child: Transform(
+        transform: Matrix4.identity()
+          ..translate(offset.dx, offset.dy)
+          ..scale(scale),
+        alignment: Alignment.topLeft,
+        child: SizedBox(
+          width: targetQRRect.width,
+          height: targetQRRect.height,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+            child: QrImageView(
+              data: qrData,
+              version: QrVersions.auto,
+              gapless: false,
+              eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Colors.black),
+              dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Colors.black),
+              backgroundColor: Colors.white,
+              padding: const EdgeInsets.all(8),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -842,53 +1081,13 @@ class ScannerBox extends StatelessWidget {
           ),
         ),
         if (showQrContent && qrData != null && qrTargetRect != null && qrStartRect != null)
-          _buildQrContent(),
-      ],
-    );
-  }
-
-  Widget _buildQrContent() {
-    const inset = 3.0;
-    final startQRRect = qrStartRect!.deflate(inset);
-    final targetQRRect = qrTargetRect!.deflate(inset);
-
-    final offset = Offset.lerp(
-      startQRRect.topLeft - targetQRRect.topLeft,
-      Offset.zero,
-      qrProgress,
-    )!;
-
-    final scale = ui.lerpDouble(
-      startQRRect.width / targetQRRect.width,
-      1.0,
-      qrProgress,
-    )!;
-
-    return Positioned(
-      left: targetQRRect.left,
-      top: targetQRRect.top,
-      child: Transform(
-        transform: Matrix4.identity()
-          ..translate(offset.dx, offset.dy)
-          ..scale(scale),
-        alignment: Alignment.topLeft,
-        child: SizedBox(
-          width: targetQRRect.width,
-          height: targetQRRect.height,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: QrImageView(
-              data: qrData!,
-              version: QrVersions.auto,
-              gapless: false,
-              eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.square, color: Colors.black),
-              dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.square, color: Colors.black),
-              backgroundColor: Colors.white,
-              padding: const EdgeInsets.all(8),
-            ),
+          QrContentWidget(
+            qrData: qrData!,
+            qrStartRect: qrStartRect!,
+            qrTargetRect: qrTargetRect!,
+            qrProgress: qrProgress,
           ),
-        ),
-      ),
+      ],
     );
   }
 }
@@ -934,11 +1133,7 @@ class _HistorySheet extends StatelessWidget {
               final isUrl = _isUrl(value);
               return ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                leading: Icon(
-                  isUrl ? Icons.link_rounded : Icons.qr_code_2_rounded,
-                  color: accentColor,
-                  size: 20,
-                ),
+                leading: Icon(isUrl ? Icons.link_rounded : Icons.qr_code_2_rounded, color: accentColor, size: 20),
                 title: Text(
                   value,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -961,9 +1156,9 @@ class _HistorySheet extends StatelessWidget {
                       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: value));
-                        ScaffoldMessenger.of(ctx).showSnackBar(
-                          const SnackBar(content: Text('Copied'), duration: Duration(seconds: 1)),
-                        );
+                        ScaffoldMessenger.of(
+                          ctx,
+                        ).showSnackBar(const SnackBar(content: Text('Copied'), duration: Duration(seconds: 1)));
                       },
                     ),
                   ],
@@ -1015,12 +1210,7 @@ class _ResultCard extends StatelessWidget {
               children: [
                 Text(
                   _isUrl ? 'URL DETECTED' : 'QR CODE SCANNED',
-                  style: TextStyle(
-                    color: accentColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
-                  ),
+                  style: TextStyle(color: accentColor, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.2),
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -1047,9 +1237,9 @@ class _ResultCard extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: value));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1)),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1)));
             },
           ),
         ],

@@ -505,8 +505,17 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
   }
 
   InputImage? _toInputImage(CameraImage image) {
-    final rotation = _intToRotation(_sensorOrientation);
-    if (rotation == null) return null;
+    // iOS delivers frames already in display orientation, so no rotation is
+    // needed. Passing the sensor rotation would cause ML Kit to treat the
+    // already-portrait image as landscape, shifting corner coordinates.
+    final InputImageRotation rotation;
+    if (Platform.isIOS) {
+      rotation = InputImageRotation.rotation0deg;
+    } else {
+      final r = _intToRotation(_sensorOrientation);
+      if (r == null) return null;
+      rotation = r;
+    }
 
     final format = Platform.isAndroid ? InputImageFormat.nv21 : InputImageFormat.bgra8888;
     final Uint8List bytes;
@@ -550,8 +559,6 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     }
   }
 
-  // ML Kit returns corners already in upright display orientation because it
-  // applies the rotation we pass via InputImageMetadata — no affine transform needed.
   Rect? _mapToScreen(List<Offset> corners, Size imageSize) {
     if (corners.isEmpty) return null;
     final screenSize = MediaQuery.of(context).size;
@@ -560,7 +567,14 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     if (previewSize == null) return null;
 
     final orient = _sensorOrientation;
-    final upright = (orient == 90 || orient == 270) ? Size(imageSize.height, imageSize.width) : imageSize;
+    // iOS frames are already portrait — don't swap imageSize. Android frames
+    // are landscape (sensor-native), so swap to match the display orientation
+    // that ML Kit returns corner points in.
+    final upright = (!Platform.isIOS && (orient == 90 || orient == 270))
+        ? Size(imageSize.height, imageSize.width)
+        : imageSize;
+    // previewSize from the camera controller is always sensor-native (landscape),
+    // so always swap when orient is 90/270 to get the display-upright size.
     final displaySrcSize = (orient == 90 || orient == 270) ? Size(previewSize.height, previewSize.width) : previewSize;
     if (displaySrcSize.isEmpty) return null;
 

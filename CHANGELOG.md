@@ -1,3 +1,7 @@
+## 1.1.1
+
+- Fix iOS camera rotation: frames are already in display orientation so ML Kit now receives `rotation0deg`, correcting corner-coordinate mapping on iOS.
+
 ## 1.1.0
 
 - Add `stopStream()` and `resumeStream()` methods to `QrLensScannerController` for manual camera stream control.

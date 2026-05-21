@@ -22,7 +22,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  qr_lens: ^1.0.0
+  qr_lens: latest
 ```
 
 ### Platform Setup

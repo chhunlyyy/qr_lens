@@ -60,6 +60,10 @@ class QrLensScannerPage extends StatefulWidget {
   /// Called if the camera fails to initialize or encounters a runtime error.
   final void Function(Object error)? onError;
 
+  /// Called when an image is picked from the gallery but no QR code is detected.
+  /// If null, a default snack bar message is shown.
+  final VoidCallback? onQrNotFound;
+
   /// Called once the camera has initialized and the image stream is running.
   final VoidCallback? onCameraReady;
 
@@ -191,6 +195,7 @@ class QrLensScannerPage extends StatefulWidget {
     this.onScanComplete,
     this.onError,
     this.onCameraReady,
+    this.onQrNotFound,
     // app bar
     this.title = const Text(
       'QR Scanner',
@@ -642,9 +647,13 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     if (barcodes.isEmpty || barcodes.first.rawValue == null) {
       await _resumeCameraStream();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('No QR code found in image'), duration: Duration(seconds: 2)));
+      if (widget.onQrNotFound != null) {
+        widget.onQrNotFound!();
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No QR code found in image'), duration: Duration(seconds: 2)));
+      }
       return;
     }
 
@@ -1018,14 +1027,14 @@ class QrContentWidget extends StatelessWidget {
       top: targetQRRect.top,
       child: Transform(
         transform: Matrix4.identity()
-          ..translate(offset.dx, offset.dy)
-          ..scale(scale),
+          ..translateByDouble(offset.dx, offset.dy, 0, 0)
+          ..scaleByDouble(scale, scale, 1, 1),
         alignment: Alignment.topLeft,
         child: SizedBox(
           width: targetQRRect.width,
           height: targetQRRect.height,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
             child: QrImageView(
               data: qrData,
               version: QrVersions.auto,

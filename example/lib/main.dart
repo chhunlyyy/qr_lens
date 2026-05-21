@@ -119,7 +119,7 @@ class _ExampleItem {
 class _ExampleCard extends StatelessWidget {
   final _ExampleItem item;
 
-  const _ExampleCard({super.key, required this.item});
+  const _ExampleCard({required this.item});
 
   @override
   Widget build(BuildContext context) {

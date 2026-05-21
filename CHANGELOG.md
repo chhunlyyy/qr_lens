@@ -1,3 +1,7 @@
+## 1.1.2
+
+- Add `onQrNotFound` callback to `QrLensScannerPage` — called when an image is picked from the gallery but contains no detectable QR code. Falls back to the built-in snack bar when not provided.
+
 ## 1.1.1
 
 - Fix iOS camera rotation: frames are already in display orientation so ML Kit now receives `rotation0deg`, correcting corner-coordinate mapping on iOS.

@@ -1027,7 +1027,7 @@ class QrContentWidget extends StatelessWidget {
       top: targetQRRect.top,
       child: Transform(
         transform: Matrix4.identity()
-          ..translateByDouble(offset.dx, offset.dy, 0, 0)
+          ..translateByDouble(offset.dx, offset.dy, 0, 1.0)
           ..scaleByDouble(scale, scale, 1, 1),
         alignment: Alignment.topLeft,
         child: SizedBox(

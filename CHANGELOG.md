@@ -1,3 +1,7 @@
+## 1.1.3
+
+- Fix QR code fly-to-center animation disappearing after updating to vector_math 2.2.0: replaced deprecated `translate`/`scale` Matrix4 calls with `translateByDouble`/`scaleByDouble`, passing the correct homogeneous `tw=1.0` argument so the transform matrix remains valid.
+
 ## 1.1.2
 
 - Add `onQrNotFound` callback to `QrLensScannerPage` — called when an image is picked from the gallery but contains no detectable QR code. Falls back to the built-in snack bar when not provided.

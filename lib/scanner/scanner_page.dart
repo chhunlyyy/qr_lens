@@ -606,6 +606,33 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     } catch (_) {}
   }
 
+  Future<InputImage?> _inputImageFromBytes(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (raw == null) return null;
+      final pixels = Uint8List.fromList(raw.buffer.asUint8List());
+      for (int i = 0; i < pixels.length; i += 4) {
+        final r = pixels[i];
+        pixels[i] = pixels[i + 2];
+        pixels[i + 2] = r;
+      }
+      return InputImage.fromBytes(
+        bytes: pixels,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: InputImageRotation.rotation0deg,
+          format: InputImageFormat.bgra8888,
+          bytesPerRow: image.width * 4,
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _resumeCameraStream() async {
     final ctrl = _cameraController;
     if (ctrl != null && ctrl.value.isInitialized && !ctrl.value.isStreamingImages) {
@@ -639,7 +666,11 @@ class _QrLensScannerPageState extends State<QrLensScannerPage> with TickerProvid
     _stopCameraStream();
 
     final bytes = await file.readAsBytes();
-    final inputImage = InputImage.fromFilePath(file.path);
+    final inputImage = await _inputImageFromBytes(bytes);
+    if (inputImage == null) {
+      await _resumeCameraStream();
+      return;
+    }
     final barcodes = await _barcodeScanner.processImage(inputImage);
 
     if (!mounted) return;

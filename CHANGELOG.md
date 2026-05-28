@@ -1,3 +1,7 @@
+## 1.1.4
+
+- Fix iOS screenshot/gallery image scanning: replace `InputImage.fromFilePath` with manual `dart:ui` decoding + `InputImage.fromBytes` to resolve detection failures on iOS.
+
 ## 1.1.3
 
 - Fix QR code fly-to-center animation disappearing after updating to vector_math 2.2.0: replaced deprecated `translate`/`scale` Matrix4 calls with `translateByDouble`/`scaleByDouble`, passing the correct homogeneous `tw=1.0` argument so the transform matrix remains valid.

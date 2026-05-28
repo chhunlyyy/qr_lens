@@ -1,3 +1,7 @@
+## 1.1.5
+
+- Fix iOS screenshot/gallery image scanning: use `dart:ui`-decoded `InputImage.fromBytes` with `bgra8888` as fallback when `fromFilePath` returns no barcodes. The fallback is guarded by try-catch to handle Android where `fromBytes` only supports YUV formats.
+
 ## 1.1.4
 
 - Fix iOS screenshot/gallery image scanning: replace `InputImage.fromFilePath` with manual `dart:ui` decoding + `InputImage.fromBytes` to resolve detection failures on iOS.
